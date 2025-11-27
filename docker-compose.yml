@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - BASE_URL=http://localhost:3000
+    volumes:
+      # Mount temp directory for development (optional)
+      - ./temp:/app/temp
+    restart: unless-stopped

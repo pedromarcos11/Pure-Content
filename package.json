@@ -1,0 +1,21 @@
+{
+  "name": "social-media-content-backend",
+  "version": "1.0.0",
+  "description": "Backend API for viewing social media content without distractions",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["instagram", "social-media", "content-viewer"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2",
+    "axios": "^1.7.9",
+    "express-rate-limit": "^7.5.0",
+    "cors": "^2.8.5",
+    "puppeteer": "^24.15.0",
+    "fluent-ffmpeg": "^2.1.3"
+  }
+}
