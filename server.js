@@ -560,17 +560,14 @@ function getBaseUrl(req) {
 function wrapWithProxy(url, mediaType = 'image', baseUrl) {
     if (!url) return url;
 
-    // Don't proxy if it's already a local URL (merged videos)
+    // Only proxy local merged videos
     if (url.startsWith('/temp/')) {
         return url;
     }
 
-    // For images, use proxy to bypass Instagram referer restrictions
-    if (mediaType === 'image' && (url.includes('cdninstagram.com') || url.includes('fbcdn.net'))) {
-        return `${baseUrl}/api/proxy?url=${encodeURIComponent(url)}`;
-    }
-
-    // Videos can be loaded directly (for now)
+    // Let browser fetch Instagram CDN URLs directly
+    // Instagram's signed URLs work better when fetched by the browser
+    // The browser sends proper cookies, headers, and passes CORS checks
     return url;
 }
 
