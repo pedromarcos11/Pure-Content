@@ -187,21 +187,36 @@ async function loadContent() {
     }
 }
 
+// Helper function to decode HTML entities in URLs
+function decodeUrl(url) {
+    if (!url) return url;
+    // Decode HTML entities (especially &amp; -> &)
+    return url
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"');
+}
+
 // Display content from backend response
 function displayContent(data) {
     const { mediaUrl, thumbnailUrl, caption, author, mediaType, timestamp } = data;
+
+    // Decode URLs to ensure they're properly formatted
+    const decodedMediaUrl = decodeUrl(mediaUrl);
+    const decodedThumbnailUrl = decodeUrl(thumbnailUrl);
 
     let mediaHtml = '';
 
     if (mediaType === 'video') {
         mediaHtml = `
             <video controls autoplay muted loop playsinline>
-                <source src="${mediaUrl}" type="video/mp4">
+                <source src="${decodedMediaUrl}" type="video/mp4">
                 Seu navegador não suporta a tag de vídeo.
             </video>
         `;
     } else {
-        mediaHtml = `<img src="${mediaUrl}" alt="Conteúdo do Instagram">`;
+        mediaHtml = `<img src="${decodedMediaUrl}" alt="Conteúdo do Instagram">`;
     }
 
     const timestampText = timestamp

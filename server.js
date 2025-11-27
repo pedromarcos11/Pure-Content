@@ -19,7 +19,8 @@ if (!fs.existsSync(TEMP_DIR)) {
 }
 
 // Trust proxy (required for Railway and other reverse proxies)
-app.set('trust proxy', true);
+// Set to 1 to trust only the first proxy (Railway), not all proxies
+app.set('trust proxy', 1);
 
 // Middleware
 app.use(cors());
@@ -396,9 +397,17 @@ app.post('/api/fetch-content', async (req, res) => {
         // Final URL sanitization - ensure no HTML entities remain
         if (postData.mediaUrl) {
             postData.mediaUrl = decodeUrlEntities(postData.mediaUrl);
+            // Additional check - replace any remaining &amp; with &
+            postData.mediaUrl = postData.mediaUrl.replace(/&amp;/g, '&');
+            // Ensure URL is properly formatted
+            if (postData.mediaUrl.includes('&amp;')) {
+                console.log('[WARNING] URL still contains &amp; after decoding:', postData.mediaUrl.substring(0, 100));
+                postData.mediaUrl = postData.mediaUrl.replace(/&amp;/g, '&');
+            }
         }
         if (postData.thumbnailUrl) {
             postData.thumbnailUrl = decodeUrlEntities(postData.thumbnailUrl);
+            postData.thumbnailUrl = postData.thumbnailUrl.replace(/&amp;/g, '&');
         }
 
         res.json({
@@ -438,8 +447,10 @@ function decodeUrlEntities(url) {
     // Handle multiple encodings (e.g., &amp;amp; -> &amp; -> &)
     let decoded = url;
     let previous = '';
+    let iterations = 0;
     // Keep decoding until no more changes (handles double/triple encoding)
-    while (decoded !== previous) {
+    // Limit iterations to prevent infinite loops
+    while (decoded !== previous && iterations < 10) {
         previous = decoded;
         decoded = decoded
             .replace(/&amp;/gi, '&')
@@ -451,7 +462,10 @@ function decodeUrlEntities(url) {
             .replace(/&#x3D;/gi, '=')
             .replace(/&#39;/gi, "'")
             .replace(/&#x2F;/gi, '/');
+        iterations++;
     }
+    // Final cleanup - ensure no HTML entities remain
+    decoded = decoded.replace(/&amp;/g, '&');
     return decoded;
 }
 
@@ -801,38 +815,42 @@ function parseMetaTags(html) {
 async function extractWithPuppeteer(url) {
     let browser = null;
     try {
+        // Try to launch Puppeteer with minimal args first
+        const puppeteerArgs = [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-web-security',
+            '--disable-software-rasterizer',
+            '--disable-extensions',
+            '--disable-background-networking',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-breakpad',
+            '--disable-component-extensions-with-background-page',
+            '--disable-default-apps',
+            '--disable-features=TranslateUI',
+            '--disable-ipc-flooding-protection',
+            '--disable-renderer-backgrounding',
+            '--disable-sync',
+            '--metrics-recording-only',
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--no-pings',
+            '--no-zygote',
+            '--use-gl=swiftshader',
+            '--window-size=1920,1080',
+            '--disable-crash-reporter',
+            '--crash-dumps-dir=/tmp'
+        ];
+
         browser = await puppeteer.launch({
             headless: true,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--disable-web-security',
-                '--disable-software-rasterizer',
-                '--disable-extensions',
-                '--disable-background-networking',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-breakpad',
-                '--disable-component-extensions-with-background-page',
-                '--disable-default-apps',
-                '--disable-features=TranslateUI',
-                '--disable-ipc-flooding-protection',
-                '--disable-renderer-backgrounding',
-                '--disable-sync',
-                '--metrics-recording-only',
-                '--no-first-run',
-                '--no-default-browser-check',
-                '--no-pings',
-                '--no-zygote',
-                '--use-gl=swiftshader',
-                '--window-size=1920,1080',
-                '--disable-crash-reporter',
-                '--disable-crashpad'
-            ],
-            ignoreDefaultArgs: ['--disable-extensions']
+            args: puppeteerArgs,
+            ignoreDefaultArgs: ['--disable-extensions', '--enable-crashpad'],
+            ignoreHTTPSErrors: true
         });
 
         const page = await browser.newPage();
