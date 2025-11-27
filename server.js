@@ -422,7 +422,8 @@ app.post('/api/fetch-content', async (req, res) => {
         if (isVideoUrl && postData?.mediaType === 'image') {
             console.log('[INFO] Detected video URL but got image, trying Puppeteer...');
             try {
-                const puppeteerData = await extractWithPuppeteer(url);
+                const baseUrl = getBaseUrl(req);
+                const puppeteerData = await extractWithPuppeteer(url, baseUrl);
                 if (puppeteerData?.mediaUrl && puppeteerData.mediaType === 'video') {
                     postData = puppeteerData;
                     console.log('[SUCCESS] Extracted video with Puppeteer');
@@ -512,10 +513,11 @@ app.post('/api/fetch-content', async (req, res) => {
         }
 
         // Wrap media URLs with proxy for images to bypass Instagram restrictions
+        const baseUrl = getBaseUrl(req);
         const responseData = {
             ...postData,
-            mediaUrl: wrapWithProxy(postData.mediaUrl, postData.mediaType),
-            thumbnailUrl: wrapWithProxy(postData.thumbnailUrl, 'image'),
+            mediaUrl: wrapWithProxy(postData.mediaUrl, postData.mediaType, baseUrl),
+            thumbnailUrl: wrapWithProxy(postData.thumbnailUrl, 'image', baseUrl),
             timestamp: new Date().toISOString()
         };
 
@@ -546,18 +548,26 @@ app.post('/api/fetch-content', async (req, res) => {
     }
 });
 
+// Helper function to get the base URL from request
+function getBaseUrl(req) {
+    // Check if behind a proxy (Railway, Heroku, etc.)
+    const protocol = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    return `${protocol}://${host}`;
+}
+
 // Helper function to wrap Instagram CDN URLs with our proxy
-function wrapWithProxy(url, mediaType = 'image') {
+function wrapWithProxy(url, mediaType = 'image', baseUrl) {
     if (!url) return url;
 
     // Don't proxy if it's already a local URL (merged videos)
-    if (url.includes(BASE_URL) || url.startsWith('/temp/')) {
+    if (url.startsWith('/temp/')) {
         return url;
     }
 
     // For images, use proxy to bypass Instagram referer restrictions
     if (mediaType === 'image' && (url.includes('cdninstagram.com') || url.includes('fbcdn.net'))) {
-        return `${BASE_URL}/api/proxy?url=${encodeURIComponent(url)}`;
+        return `${baseUrl}/api/proxy?url=${encodeURIComponent(url)}`;
     }
 
     // Videos can be loaded directly (for now)
@@ -948,7 +958,7 @@ function parseMetaTags(html) {
 }
 
 // Puppeteer-based extraction (for videos that don't appear in HTML)
-async function extractWithPuppeteer(url) {
+async function extractWithPuppeteer(url, baseUrl) {
     let browser = null;
     try {
         // Puppeteer args optimized for Railway and containerized environments
@@ -1121,7 +1131,7 @@ async function extractWithPuppeteer(url) {
 
                 try {
                     const mergedVideoPath = await mergeVideoAudio(cleanVideoUrl, cleanAudioUrl, url);
-                    const serverUrl = `${BASE_URL}/temp/${path.basename(mergedVideoPath)}`;
+                    const serverUrl = `${baseUrl}/temp/${path.basename(mergedVideoPath)}`;
 
                     return {
                         mediaUrl: serverUrl,
