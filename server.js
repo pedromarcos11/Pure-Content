@@ -396,18 +396,46 @@ app.post('/api/fetch-content', async (req, res) => {
 
         // Final URL sanitization - ensure no HTML entities remain
         if (postData.mediaUrl) {
-            postData.mediaUrl = decodeUrlEntities(postData.mediaUrl);
-            // Additional check - replace any remaining &amp; with &
-            postData.mediaUrl = postData.mediaUrl.replace(/&amp;/g, '&');
-            // Ensure URL is properly formatted
+            // Multiple passes to ensure complete decoding
+            let url = postData.mediaUrl;
+            let previous = '';
+            let iterations = 0;
+            // Keep decoding until no more changes
+            while (url !== previous && iterations < 5) {
+                previous = url;
+                url = decodeUrlEntities(url);
+                url = url.replace(/&amp;/g, '&');
+                url = url.replace(/&amp;/g, '&'); // Double pass
+                iterations++;
+            }
+            postData.mediaUrl = url;
+            
+            // Final verification and fix
             if (postData.mediaUrl.includes('&amp;')) {
-                console.log('[WARNING] URL still contains &amp; after decoding:', postData.mediaUrl.substring(0, 100));
+                console.log('[WARNING] URL still contains &amp; after decoding, fixing...');
+                console.log('[DEBUG] Before fix:', postData.mediaUrl.substring(0, 150));
                 postData.mediaUrl = postData.mediaUrl.replace(/&amp;/g, '&');
+                console.log('[DEBUG] After fix:', postData.mediaUrl.substring(0, 150));
+            }
+            
+            // Verify URL is valid
+            try {
+                new URL(postData.mediaUrl);
+            } catch (e) {
+                console.error('[ERROR] Invalid URL after processing:', postData.mediaUrl.substring(0, 150));
             }
         }
         if (postData.thumbnailUrl) {
-            postData.thumbnailUrl = decodeUrlEntities(postData.thumbnailUrl);
-            postData.thumbnailUrl = postData.thumbnailUrl.replace(/&amp;/g, '&');
+            let url = postData.thumbnailUrl;
+            let previous = '';
+            let iterations = 0;
+            while (url !== previous && iterations < 5) {
+                previous = url;
+                url = decodeUrlEntities(url);
+                url = url.replace(/&amp;/g, '&');
+                iterations++;
+            }
+            postData.thumbnailUrl = url;
         }
 
         res.json({
@@ -766,17 +794,29 @@ function parseMetaTags(html) {
         // Try to get video URL from twitter tags as well
         const twitterPlayerMatch = html.match(/<meta\s+name=["']twitter:player:stream["']\s+content=["']([^"']+)["']/i);
 
-        const videoUrl = ogVideoMatch?.[1] || twitterPlayerMatch?.[1];
-        const imageUrl = ogImageMatch?.[1];
+        let videoUrl = ogVideoMatch?.[1] || twitterPlayerMatch?.[1];
+        let imageUrl = ogImageMatch?.[1];
+        
+        // Decode HTML entities IMMEDIATELY after extraction
+        if (videoUrl) {
+            videoUrl = decodeUrlEntities(videoUrl);
+            videoUrl = videoUrl.replace(/&amp;/g, '&');
+        }
+        if (imageUrl) {
+            imageUrl = decodeUrlEntities(imageUrl);
+            imageUrl = imageUrl.replace(/&amp;/g, '&');
+        }
+        
         let mediaUrl = videoUrl || imageUrl || null;
 
         if (!mediaUrl) {
             return null;
         }
 
-        // Decode HTML entities from URLs
+        // Additional decoding pass
         mediaUrl = decodeUrlEntities(mediaUrl);
-        const imageUrlDecoded = decodeUrlEntities(imageUrl);
+        mediaUrl = mediaUrl.replace(/&amp;/g, '&');
+        const imageUrlDecoded = imageUrl ? decodeUrlEntities(imageUrl).replace(/&amp;/g, '&') : null;
 
         // Remove size restrictions from image URLs
         if (!videoUrl && mediaUrl) {

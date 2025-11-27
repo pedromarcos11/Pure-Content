@@ -202,22 +202,13 @@ function decodeUrl(url) {
 function displayContent(data) {
     const { mediaUrl, thumbnailUrl, caption, author, mediaType, timestamp } = data;
 
-    // Decode URLs to ensure they're properly formatted
-    const decodedMediaUrl = decodeUrl(mediaUrl);
+    // Decode URLs to ensure they're properly formatted (multiple passes)
+    let decodedMediaUrl = decodeUrl(mediaUrl);
+    // Additional pass to ensure all &amp; are removed
+    decodedMediaUrl = decodedMediaUrl.replace(/&amp;/g, '&');
+    decodedMediaUrl = decodedMediaUrl.replace(/&amp;/g, '&'); // Double pass
+    
     const decodedThumbnailUrl = decodeUrl(thumbnailUrl);
-
-    let mediaHtml = '';
-
-    if (mediaType === 'video') {
-        mediaHtml = `
-            <video controls autoplay muted loop playsinline>
-                <source src="${decodedMediaUrl}" type="video/mp4">
-                Seu navegador não suporta a tag de vídeo.
-            </video>
-        `;
-    } else {
-        mediaHtml = `<img src="${decodedMediaUrl}" alt="Conteúdo do Instagram">`;
-    }
 
     const timestampText = timestamp
         ? new Date(timestamp).toLocaleDateString('pt-BR', {
@@ -227,6 +218,7 @@ function displayContent(data) {
           })
         : 'Data desconhecida';
 
+    // Create HTML structure
     contentDisplay.innerHTML = `
         <div class="content-card">
             <div class="content-header">
@@ -237,7 +229,10 @@ function displayContent(data) {
             </div>
 
             <div class="content-media">
-                ${mediaHtml}
+                ${mediaType === 'video' 
+                    ? '<video controls autoplay muted loop playsinline><source type="video/mp4">Seu navegador não suporta a tag de vídeo.</video>'
+                    : '<img alt="Conteúdo do Instagram">'
+                }
             </div>
 
             ${caption ? `
@@ -245,6 +240,19 @@ function displayContent(data) {
             ` : ''}
         </div>
     `;
+
+    // Set media source using setAttribute to avoid HTML encoding
+    const mediaElement = contentDisplay.querySelector(mediaType === 'video' ? 'video source' : 'img');
+    if (mediaElement) {
+        mediaElement.setAttribute('src', decodedMediaUrl);
+        // For video, also set on video element
+        if (mediaType === 'video') {
+            const videoElement = contentDisplay.querySelector('video');
+            if (videoElement) {
+                videoElement.querySelector('source').setAttribute('src', decodedMediaUrl);
+            }
+        }
+    }
 
     contentDisplay.classList.add('visible');
 
