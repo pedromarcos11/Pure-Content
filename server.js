@@ -18,6 +18,9 @@ if (!fs.existsSync(TEMP_DIR)) {
     fs.mkdirSync(TEMP_DIR, { recursive: true });
 }
 
+// Trust proxy (required for Railway and other reverse proxies)
+app.set('trust proxy', true);
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -806,8 +809,30 @@ async function extractWithPuppeteer(url) {
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-gpu',
-                '--disable-web-security'
-            ]
+                '--disable-web-security',
+                '--disable-software-rasterizer',
+                '--disable-extensions',
+                '--disable-background-networking',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-breakpad',
+                '--disable-component-extensions-with-background-page',
+                '--disable-default-apps',
+                '--disable-features=TranslateUI',
+                '--disable-ipc-flooding-protection',
+                '--disable-renderer-backgrounding',
+                '--disable-sync',
+                '--metrics-recording-only',
+                '--no-first-run',
+                '--no-default-browser-check',
+                '--no-pings',
+                '--no-zygote',
+                '--use-gl=swiftshader',
+                '--window-size=1920,1080',
+                '--disable-crash-reporter',
+                '--disable-crashpad'
+            ],
+            ignoreDefaultArgs: ['--disable-extensions']
         });
 
         const page = await browser.newPage();
