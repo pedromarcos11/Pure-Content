@@ -44,9 +44,13 @@ COPY . .
 # Create temp directory for merged videos
 RUN mkdir -p temp && chmod 777 temp
 
+# Create directory for Chrome crashes and set permissions
+RUN mkdir -p /tmp/chrome-crashes && chmod 1777 /tmp/chrome-crashes
+
 # Tell Puppeteer to use installed chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV CHROME_DEVEL_SANDBOX=/usr/lib/chromium/chrome-sandbox
 
 # Expose port
 EXPOSE 3000
@@ -55,6 +59,9 @@ EXPOSE 3000
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 RUN chown -R appuser:appuser /app
 USER appuser
+
+# Set environment to disable Chrome crash reporting
+ENV CHROME_CRASH_DIR=/tmp/chrome-crashes
 
 # Start the application
 CMD ["node", "server.js"]

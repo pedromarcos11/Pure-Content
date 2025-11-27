@@ -51,6 +51,69 @@ app.get('/health', (req, res) => {
     });
 });
 
+// Proxy endpoint to bypass Instagram CORS/referer restrictions
+app.get('/api/proxy', async (req, res) => {
+    try {
+        const { url } = req.query;
+
+        if (!url) {
+            return res.status(400).json({
+                error: 'URL parameter is required'
+            });
+        }
+
+        // Validate that it's an Instagram CDN URL
+        if (!url.includes('cdninstagram.com') && !url.includes('fbcdn.net')) {
+            return res.status(400).json({
+                error: 'Only Instagram CDN URLs are allowed'
+            });
+        }
+
+        console.log('[PROXY] Fetching:', url.substring(0, 100) + '...');
+
+        // Fetch the image/video from Instagram with proper headers
+        const response = await axios.get(url, {
+            responseType: 'stream',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Referer': 'https://www.instagram.com/',
+                'Origin': 'https://www.instagram.com',
+                'Sec-Fetch-Dest': 'image',
+                'Sec-Fetch-Mode': 'no-cors',
+                'Sec-Fetch-Site': 'cross-site'
+            },
+            timeout: 30000,
+            maxRedirects: 5
+        });
+
+        // Set appropriate headers for the response
+        const contentType = response.headers['content-type'] || 'application/octet-stream';
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        // Stream the response
+        response.data.pipe(res);
+
+    } catch (error) {
+        console.error('[PROXY] Error:', error.message);
+
+        if (error.response?.status === 404) {
+            return res.status(404).json({
+                error: 'Media not found'
+            });
+        }
+
+        res.status(500).json({
+            error: 'Failed to fetch media',
+            message: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+        });
+    }
+});
+
 // Debug endpoint to fetch raw HTML (useful for debugging)
 app.get('/debug/fetch', async (req, res) => {
     try {
@@ -234,22 +297,32 @@ app.post('/api/fetch-content', async (req, res) => {
             
             // Remove size restrictions from image URLs to get full quality
             if (!videoUrlMatch && mediaUrl) {
-                // Remove size parameters like s640x640, s1080x1080, etc.
-                mediaUrl = mediaUrl.replace(/[?&]stp=[^&]*/g, ''); // Remove stp parameter
-                mediaUrl = mediaUrl.replace(/[?&]_nc_cat=[^&]*/g, ''); // Remove _nc_cat
-                mediaUrl = mediaUrl.replace(/[?&]ccb=[^&]*/g, ''); // Remove ccb
-                mediaUrl = mediaUrl.replace(/[?&]_nc_sid=[^&]*/g, ''); // Remove _nc_sid
-                mediaUrl = mediaUrl.replace(/[?&]efg=[^&]*/g, ''); // Remove efg
-                mediaUrl = mediaUrl.replace(/[?&]_nc_ohc=[^&]*/g, ''); // Remove _nc_ohc
-                mediaUrl = mediaUrl.replace(/[?&]_nc_oc=[^&]*/g, ''); // Remove _nc_oc
-                mediaUrl = mediaUrl.replace(/[?&]_nc_zt=[^&]*/g, ''); // Remove _nc_zt
-                mediaUrl = mediaUrl.replace(/[?&]_nc_ht=[^&]*/g, ''); // Remove _nc_ht
-                mediaUrl = mediaUrl.replace(/[?&]_nc_gid=[^&]*/g, ''); // Remove _nc_gid
+                // Split URL into base and query string
+                const urlParts = mediaUrl.split('?');
+                let baseUrl = urlParts[0];
+                let queryString = urlParts.slice(1).join('?');
+
                 // Remove size indicators from path (s640x640, s1080x1080, etc.)
-                mediaUrl = mediaUrl.replace(/\/s\d+x\d+[a-z]?_[a-z]+-jpg[^?&]*/g, '');
-                // Clean up multiple consecutive & or ?&
-                mediaUrl = mediaUrl.replace(/[?&]+/g, (match, offset) => offset === 0 ? '?' : '&');
-                mediaUrl = mediaUrl.replace(/\?$/, ''); // Remove trailing ?
+                baseUrl = baseUrl.replace(/\/s\d+x\d+[a-z]?_[a-z]+-jpg/g, '');
+
+                // Parse query parameters and filter out tracking/size params
+                if (queryString) {
+                    const params = queryString.split('&').filter(param => {
+                        const key = param.split('=')[0];
+                        // Keep only essential params (oh and oe are required for Instagram CDN)
+                        return key === 'oh' || key === 'oe';
+                    });
+
+                    // Reconstruct URL
+                    if (params.length > 0) {
+                        mediaUrl = baseUrl + '?' + params.join('&');
+                    } else {
+                        mediaUrl = baseUrl;
+                    }
+                } else {
+                    mediaUrl = baseUrl;
+                }
+
                 console.log('[DEBUG] Cleaned image URL to remove size restrictions');
             }
 
@@ -438,10 +511,15 @@ app.post('/api/fetch-content', async (req, res) => {
             postData.thumbnailUrl = url;
         }
 
-        res.json({
+        // Wrap media URLs with proxy for images to bypass Instagram restrictions
+        const responseData = {
             ...postData,
+            mediaUrl: wrapWithProxy(postData.mediaUrl, postData.mediaType),
+            thumbnailUrl: wrapWithProxy(postData.thumbnailUrl, 'image'),
             timestamp: new Date().toISOString()
-        });
+        };
+
+        res.json(responseData);
 
     } catch (error) {
         console.error('Error fetching Instagram content:', error.message);
@@ -467,6 +545,24 @@ app.post('/api/fetch-content', async (req, res) => {
         });
     }
 });
+
+// Helper function to wrap Instagram CDN URLs with our proxy
+function wrapWithProxy(url, mediaType = 'image') {
+    if (!url) return url;
+
+    // Don't proxy if it's already a local URL (merged videos)
+    if (url.includes(BASE_URL) || url.startsWith('/temp/')) {
+        return url;
+    }
+
+    // For images, use proxy to bypass Instagram referer restrictions
+    if (mediaType === 'image' && (url.includes('cdninstagram.com') || url.includes('fbcdn.net'))) {
+        return `${BASE_URL}/api/proxy?url=${encodeURIComponent(url)}`;
+    }
+
+    // Videos can be loaded directly (for now)
+    return url;
+}
 
 // Helper function to decode HTML entities from URLs
 function decodeUrlEntities(url) {
@@ -855,7 +951,7 @@ function parseMetaTags(html) {
 async function extractWithPuppeteer(url) {
     let browser = null;
     try {
-        // Try to launch Puppeteer with minimal args first
+        // Puppeteer args optimized for Railway and containerized environments
         const puppeteerArgs = [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -867,7 +963,6 @@ async function extractWithPuppeteer(url) {
             '--disable-background-networking',
             '--disable-background-timer-throttling',
             '--disable-backgrounding-occluded-windows',
-            '--disable-breakpad',
             '--disable-component-extensions-with-background-page',
             '--disable-default-apps',
             '--disable-features=TranslateUI',
@@ -881,16 +976,17 @@ async function extractWithPuppeteer(url) {
             '--no-zygote',
             '--use-gl=swiftshader',
             '--window-size=1920,1080',
-            '--disable-crash-reporter',
-            '--crash-dumps-dir=/tmp'
+            '--single-process', // Run in single process mode (helps with Railway)
+            '--no-crash-upload' // Disable crash reporting
         ];
 
         browser = await puppeteer.launch({
             headless: true,
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
             args: puppeteerArgs,
-            ignoreDefaultArgs: ['--disable-extensions', '--enable-crashpad'],
-            ignoreHTTPSErrors: true
+            ignoreDefaultArgs: ['--disable-extensions', '--enable-automation', '--enable-blink-features=IdleDetection'],
+            ignoreHTTPSErrors: true,
+            dumpio: false // Disable dumping IO to stdout/stderr
         });
 
         const page = await browser.newPage();
